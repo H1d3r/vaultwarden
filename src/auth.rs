@@ -405,7 +405,6 @@ impl<'r> FromRequest<'r> for Host {
 }
 
 pub struct ClientHeaders {
-    pub host: String,
     pub device_type: i32,
     pub ip: ClientIp,
 }
@@ -415,7 +414,6 @@ impl<'r> FromRequest<'r> for ClientHeaders {
     type Error = &'static str;
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let host = try_outcome!(Host::from_request(request).await).host;
         let ip = match ClientIp::from_request(request).await {
             Outcome::Success(ip) => ip,
             _ => err_handler!("Error getting Client IP"),
@@ -425,7 +423,6 @@ impl<'r> FromRequest<'r> for ClientHeaders {
             request.headers().get_one("device-type").map(|d| d.parse().unwrap_or(14)).unwrap_or_else(|| 14);
 
         Outcome::Success(ClientHeaders {
-            host,
             device_type,
             ip,
         })
@@ -531,7 +528,6 @@ pub struct OrgHeaders {
     pub user: User,
     pub org_user_type: UserOrgType,
     pub org_user: UserOrganization,
-    pub org_id: String,
     pub ip: ClientIp,
 }
 
@@ -594,7 +590,6 @@ impl<'r> FromRequest<'r> for OrgHeaders {
                         }
                     },
                     org_user,
-                    org_id: String::from(org_id),
                     ip: headers.ip,
                 })
             }
@@ -671,7 +666,6 @@ pub struct ManagerHeaders {
     pub host: String,
     pub device: Device,
     pub user: User,
-    pub org_user_type: UserOrgType,
     pub ip: ClientIp,
 }
 
@@ -689,7 +683,7 @@ impl<'r> FromRequest<'r> for ManagerHeaders {
                         _ => err_handler!("Error getting DB"),
                     };
 
-                    if !can_access_collection(&headers.org_user, &col_id, &mut conn).await {
+                    if !Collection::can_access_collection(&headers.org_user, &col_id, &mut conn).await {
                         err_handler!("The current user isn't a manager for this collection")
                     }
                 }
@@ -700,7 +694,6 @@ impl<'r> FromRequest<'r> for ManagerHeaders {
                 host: headers.host,
                 device: headers.device,
                 user: headers.user,
-                org_user_type: headers.org_user_type,
                 ip: headers.ip,
             })
         } else {
@@ -727,7 +720,6 @@ pub struct ManagerHeadersLoose {
     pub device: Device,
     pub user: User,
     pub org_user: UserOrganization,
-    pub org_user_type: UserOrgType,
     pub ip: ClientIp,
 }
 
@@ -743,7 +735,6 @@ impl<'r> FromRequest<'r> for ManagerHeadersLoose {
                 device: headers.device,
                 user: headers.user,
                 org_user: headers.org_user,
-                org_user_type: headers.org_user_type,
                 ip: headers.ip,
             })
         } else {
@@ -762,10 +753,6 @@ impl From<ManagerHeadersLoose> for Headers {
         }
     }
 }
-async fn can_access_collection(org_user: &UserOrganization, col_id: &str, conn: &mut DbConn) -> bool {
-    org_user.has_full_access()
-        || Collection::has_access_by_collection_and_user_uuid(col_id, &org_user.user_uuid, conn).await
-}
 
 impl ManagerHeaders {
     pub async fn from_loose(
@@ -777,7 +764,7 @@ impl ManagerHeaders {
             if uuid::Uuid::parse_str(col_id).is_err() {
                 err!("Collection Id is malformed!");
             }
-            if !can_access_collection(&h.org_user, col_id, conn).await {
+            if !Collection::can_access_collection(&h.org_user, col_id, conn).await {
                 err!("You don't have access to all collections!");
             }
         }
@@ -786,14 +773,12 @@ impl ManagerHeaders {
             host: h.host,
             device: h.device,
             user: h.user,
-            org_user_type: h.org_user_type,
             ip: h.ip,
         })
     }
 }
 
 pub struct OwnerHeaders {
-    pub host: String,
     pub device: Device,
     pub user: User,
     pub ip: ClientIp,
@@ -807,7 +792,6 @@ impl<'r> FromRequest<'r> for OwnerHeaders {
         let headers = try_outcome!(OrgHeaders::from_request(request).await);
         if headers.org_user_type == UserOrgType::Owner {
             Outcome::Success(Self {
-                host: headers.host,
                 device: headers.device,
                 user: headers.user,
                 ip: headers.ip,
